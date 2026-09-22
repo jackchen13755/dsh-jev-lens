@@ -74,6 +74,8 @@ export interface Config {
     /** Budget for an awaited gate decision. */
     gateTimeoutMs: number;
     gatePolicy: GatePolicy;
+    /** Conservative gate: `block` escalates instead of refusing. Settings-owned. */
+    gateAskOnly: boolean;
     /** Ask the second (recoverability) question in the same request. */
     batchedQuestions: boolean;
     /** Local rules decide the obvious cases without a request. */

@@ -123,7 +123,15 @@ export function gateAction (
   policy: GatePolicy = DEFAULT_GATE_POLICY,
 ): GateAction {
   if (band === 'allow') return 'allow'
-  const recoverable = policy.allowRestorable && restorable !== undefined && restorable < 0.5
+  /*
+   * Polarity matters here, and it is easy to get backwards. The question asks
+   * "could the data be restored?", so a *high* noul means recoverable — that is
+   * the answer allowed to relax a band. Reading it as "low means recoverable"
+   * inverts both directions at once: harmless work gets interrupted, and the one
+   * command that destroys something unrecoverable is the one that gets through.
+   * The offline test pins this against the question's own wording.
+   */
+  const recoverable = policy.allowRestorable && restorable !== undefined && restorable >= 0.5
   if (band === 'revise') {
     if (recoverable) return 'allow'
     return policy.ask ? 'ask' : 'allow'

@@ -36,6 +36,11 @@ export interface LensSettings {
     screenTimeoutMs: number;
     /** Budget for an awaited gate decision. */
     gateTimeoutMs: number;
+    /**
+     * Gate conservatively: a `block` escalates to the human instead of refusing.
+     * The one-line answer to "I want the warning but not the veto".
+     */
+    gateAskOnly: boolean;
     sessionCallLimit: number;
     dailyCallLimit: number;
 }

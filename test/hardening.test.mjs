@@ -15,7 +15,7 @@ import { locallySafe, matchDestructive, prefilter } from '../lib/rules.js'
 import { createCache, keyOf } from '../lib/cache.js'
 import { createBreaker, createLimiter, percentiles } from '../lib/resilience.js'
 import { isRetryableStatus, redact } from '../lib/jev.js'
-import { commandQuestions, destructiveBand, gateAction, gateMessage, DESTRUCTIVE_KEY, RESTORABLE_KEY } from '../lib/questions.js'
+import { commandQuestions, destructiveBand, gateAction, gateMessage, RESTORABLE_QUESTION, DESTRUCTIVE_KEY, RESTORABLE_KEY } from '../lib/questions.js'
 import { append, load, render, summarize } from '../lib/ledger.js'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'jev-lens-h-'))
@@ -147,20 +147,31 @@ test('redaction covers the shapes that actually leak', () => {
 /* ── the gate mapping ────────────────────────────────────────────────── */
 
 test('the second question can only relax a revise, never a block', () => {
+  /*
+   * Polarity is pinned to the question's own wording: it asks "could the data be
+   * restored?", so a HIGH noul is the recoverable answer and the only one that
+   * may relax a band. Getting this backwards interrupts harmless work *and*
+   * waves through the unrecoverable command, so it is tested explicitly.
+   */
+  assert.match(RESTORABLE_QUESTION.instructions, /could the data it affects be restored/i)
+  assert.match(String(RESTORABLE_QUESTION.criteria?.true), /reproducible or backed up/)
   // allow is decided by the first answer alone
   assert.equal(gateAction('allow', 0.99), 'allow')
+  assert.equal(gateAction('allow', 0.01), 'allow')
   assert.equal(gateAction('allow', undefined), 'allow')
   // revise + recoverable costs nothing; revise + unrecoverable asks a human
-  assert.equal(gateAction('revise', 0.1), 'allow')
-  assert.equal(gateAction('revise', 0.9), 'ask')
+  assert.equal(gateAction('revise', 0.9), 'allow')
+  assert.equal(gateAction('revise', 0.1), 'ask')
   assert.equal(gateAction('revise', undefined), 'ask')
   // block stays a block unless recoverable, and even then it escalates
-  assert.equal(gateAction('block', 0.9), 'deny')
-  assert.equal(gateAction('block', 0.1), 'ask')
+  assert.equal(gateAction('block', 0.1), 'deny')
+  assert.equal(gateAction('block', 0.9), 'ask')
   assert.equal(gateAction('block', undefined), 'deny')
   // policy can switch a gate off without touching the band
-  assert.equal(gateAction('block', 0.9, { ask: true, deny: false, allowRestorable: true }), 'ask')
-  assert.equal(gateAction('revise', 0.9, { ask: false, deny: true, allowRestorable: true }), 'allow')
+  assert.equal(gateAction('block', 0.1, { ask: true, deny: false, allowRestorable: true }), 'ask')
+  // Ask-only: even an unrecoverable block escalates rather than refusing.
+  assert.equal(gateAction('block', 0.1, { ask: true, deny: false, allowRestorable: true }), 'ask')
+  assert.equal(gateAction('revise', 0.1, { ask: false, deny: true, allowRestorable: true }), 'allow')
 })
 
 test('a refusal names its provenance and never reads as a silent no-op', () => {
@@ -220,7 +231,8 @@ test('latency, cache and the second question all reach the report', () => {
   const now = Date.now()
   append(dir, { t: now, kind: 'command', session: 's1', callId: 'c1', p: 0.2, band: 'allow', preview: 'ls', model: 'm', inputTokens: 400, ms: 480, attempts: 1, via: 'jev', restorable: 0.05 })
   append(dir, { t: now + 1, kind: 'command', session: 's1', callId: 'c2', p: 0.2, band: 'allow', preview: 'ls', model: 'm', inputTokens: 0, via: 'cache', restorable: 0.05 })
-  append(dir, { t: now + 2, kind: 'command', session: 's1', callId: 'c3', p: 0.8, band: 'block', preview: 'x', model: 'm', inputTokens: 400, ms: 900, attempts: 2, via: 'jev', restorable: 0.2 })
+  // restorable 0.8 = "the data can be recovered", the answer that relaxes a block
+  append(dir, { t: now + 2, kind: 'command', session: 's1', callId: 'c3', p: 0.8, band: 'block', preview: 'x', model: 'm', inputTokens: 400, ms: 900, attempts: 2, via: 'jev', restorable: 0.8 })
   append(dir, { t: now + 3, kind: 'screen', session: 's1', callId: 'c4', tool: 'fetch_page', p: 0.9, flagged: true, chars: 4000, model: 'm', inputTokens: 900, ms: 700, attempts: 1, via: 'jev', redacted: true })
   const report = summarize(load(dir, 1, new Date(now)), 1)
   assert.equal(report.commands.judged, 2)

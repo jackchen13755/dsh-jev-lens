@@ -65,6 +65,11 @@ export interface LensSettings {
   screenTimeoutMs: number
   /** Budget for an awaited gate decision. */
   gateTimeoutMs: number
+  /**
+   * Gate conservatively: a `block` escalates to the human instead of refusing.
+   * The one-line answer to "I want the warning but not the veto".
+   */
+  gateAskOnly: boolean
   sessionCallLimit: number
   dailyCallLimit: number
 }
@@ -84,6 +89,7 @@ export const LENS_DEFAULTS: LensSettings = {
   requestTimeoutMs: 8000,
   screenTimeoutMs: 1200,
   gateTimeoutMs: 4000,
+  gateAskOnly: false,
   sessionCallLimit: 300,
   dailyCallLimit: 2000,
 }
@@ -129,6 +135,7 @@ export function mergeSettings (base: LensSettings, patch: unknown): LensSettings
   if (typeof p.apiKeyRef === 'string' && p.apiKeyRef.trim()) out.apiKeyRef = p.apiKeyRef.trim()
   if (typeof p.judgeCommands === 'boolean') out.judgeCommands = p.judgeCommands
   if (typeof p.batchedQuestions === 'boolean') out.batchedQuestions = p.batchedQuestions
+  if (typeof p.gateAskOnly === 'boolean') out.gateAskOnly = p.gateAskOnly
   for (const field of Object.keys(BOUNDS) as Array<keyof LensSettings>) {
     const value = p[field]
     if (typeof value === 'number' && Number.isFinite(value)) (out[field] as number) = value

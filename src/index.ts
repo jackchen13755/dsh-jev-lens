@@ -59,6 +59,22 @@ export const inject = ['tools']
 const API_PREFIX = '/dsh-jev-lens/api'
 
 /**
+ * The plugin's own version, read from its manifest at load.
+ *
+ * Copied literals drift: the status payload used to claim a version the package
+ * had already moved past, which is exactly the kind of number a bug report
+ * quotes. One source, with a visible fallback if the manifest cannot be read.
+ */
+const VERSION: string = (() => {
+  try {
+    const manifest = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version?: string }
+    return typeof manifest.version === 'string' ? manifest.version : '0.0.0'
+  } catch {
+    return '0.0.0'
+  }
+})()
+
+/**
  * Structural view of the host context. Declared locally on purpose: the lens
  * must compile with nothing but the installed `@deepseek-ai/dsh-tools` types,
  * so it can be built and audited without a DSH source checkout.
@@ -121,6 +137,8 @@ export interface Config {
   /** Budget for an awaited gate decision. */
   gateTimeoutMs: number
   gatePolicy: GatePolicy
+  /** Conservative gate: `block` escalates instead of refusing. Settings-owned. */
+  gateAskOnly: boolean
   /** Ask the second (recoverability) question in the same request. */
   batchedQuestions: boolean
   /** Local rules decide the obvious cases without a request. */
@@ -194,6 +212,7 @@ const DEFAULTS: Required<Config> = {
   screenMaxRetries: 0,
   gateTimeoutMs: 4000,
   gatePolicy: DEFAULT_GATE_POLICY,
+  gateAskOnly: false,
   batchedQuestions: true,
   prefilter: true,
   cacheTtlMs: 900_000,
@@ -380,6 +399,9 @@ export function apply (ctx: LensContext, input: Partial<Config> = {}): void {
       backgroundTimeoutMs: value.requestTimeoutMs,
       screenTimeoutMs: value.screenTimeoutMs,
       gateTimeoutMs: value.gateTimeoutMs,
+      // One switch in the card, one policy object underneath.
+      gateAskOnly: value.gateAskOnly,
+      gatePolicy: { ...base.gatePolicy, deny: !value.gateAskOnly && base.gatePolicy.deny },
       sessionCallLimit: value.sessionCallLimit,
       dailyCallLimit: value.dailyCallLimit,
     }
@@ -1134,6 +1156,7 @@ export function apply (ctx: LensContext, input: Partial<Config> = {}): void {
     return [
       `mode=${config.mode} · model=${config.model} · 判定工具=${config.judgeTools.join(',')} · 筛查工具=${config.screenTools.join(',')}`,
       `阈值 low=${config.lowThreshold} high=${config.highThreshold} warn=${config.warnThreshold} · 第二问=${config.batchedQuestions ? 'on' : 'off'} · 本地规则=${config.prefilter ? 'on' : 'off'}`,
+      `闸门策略 ${config.gateAskOnly ? '只升级不拦截（block 也只问，永不硬拦）' : '升级 + 拦截（block 直接拒绝）'}`,
       `超时（硬上限）后台 ${config.backgroundTimeoutMs}ms×${config.backgroundMaxRetries + 1} · 筛查 ${config.screenTimeoutMs}ms · 闸门 ${config.gateTimeoutMs}ms · 探测 ${config.timeoutMs}ms`,
       `并发 后台 ${config.maxConcurrent}（队列上限 ${config.maxQueued}）· 前台 ${config.foregroundConcurrency}（永不排在后台后面）`,
       `熔断 连续 ${config.breakerFailures} 次失败 → 冷却 ${config.breakerCooldownMs}ms · key 失效后静默 ${(config.authCooldownMs / 60000).toFixed(0)} 分钟（fail-open，不再打接口）`,
@@ -1165,7 +1188,7 @@ export function apply (ctx: LensContext, input: Partial<Config> = {}): void {
   function statusPayload (): Record<string, unknown> {
     const b = breaker.state
     return {
-      version: '0.1.0',
+      version: VERSION,
       uptimeMs: Date.now() - state.startedAt,
       mode: config.mode,
       model: config.model,
@@ -1185,6 +1208,7 @@ export function apply (ctx: LensContext, input: Partial<Config> = {}): void {
         apiKeyRef: keyRef(),
         judgeCommands: config.judgeCommands,
         batchedQuestions: config.batchedQuestions,
+        gateAskOnly: config.gateAskOnly,
         lowThreshold: config.lowThreshold,
         highThreshold: config.highThreshold,
         warnThreshold: config.warnThreshold,
@@ -1273,7 +1297,7 @@ export function apply (ctx: LensContext, input: Partial<Config> = {}): void {
               }
               if (req.method === 'POST' && route === 'config') {
                 const patch = await readJson(req)
-                const next = mergeSettings({ ...LENS_DEFAULTS, mode: config.mode, apiKeyRef: keyRef(), judgeCommands: config.judgeCommands, batchedQuestions: config.batchedQuestions, lowThreshold: config.lowThreshold, highThreshold: config.highThreshold, warnThreshold: config.warnThreshold, requestTimeoutMs: config.backgroundTimeoutMs, screenTimeoutMs: config.screenTimeoutMs, gateTimeoutMs: config.gateTimeoutMs, sessionCallLimit: config.sessionCallLimit, dailyCallLimit: config.dailyCallLimit }, patch)
+                const next = mergeSettings({ ...LENS_DEFAULTS, mode: config.mode, apiKeyRef: keyRef(), judgeCommands: config.judgeCommands, batchedQuestions: config.batchedQuestions, gateAskOnly: config.gateAskOnly, lowThreshold: config.lowThreshold, highThreshold: config.highThreshold, warnThreshold: config.warnThreshold, requestTimeoutMs: config.backgroundTimeoutMs, screenTimeoutMs: config.screenTimeoutMs, gateTimeoutMs: config.gateTimeoutMs, sessionCallLimit: config.sessionCallLimit, dailyCallLimit: config.dailyCallLimit }, patch)
                 const problem = validateSettings(next)
                 if (problem) { send(res, 400, { ok: false, error: problem }); return }
                 if (!saveStored(ledgerDir, next)) { send(res, 500, { ok: false, error: `无法写入 ${ledgerDir}/config.json` }); return }
@@ -1581,7 +1605,7 @@ export function apply (ctx: LensContext, input: Partial<Config> = {}): void {
    */
   const storedFile = loadStored(ledgerDir)
   if (storedFile) {
-    const merged = mergeSettings({ ...LENS_DEFAULTS, mode: base.mode, apiKeyRef: base.apiKeyRef, judgeCommands: base.judgeCommands, batchedQuestions: base.batchedQuestions, lowThreshold: base.lowThreshold, highThreshold: base.highThreshold, warnThreshold: base.warnThreshold, requestTimeoutMs: base.backgroundTimeoutMs, screenTimeoutMs: base.screenTimeoutMs, gateTimeoutMs: base.gateTimeoutMs, sessionCallLimit: base.sessionCallLimit, dailyCallLimit: base.dailyCallLimit }, storedFile)
+    const merged = mergeSettings({ ...LENS_DEFAULTS, mode: base.mode, apiKeyRef: base.apiKeyRef, judgeCommands: base.judgeCommands, batchedQuestions: base.batchedQuestions, gateAskOnly: base.gateAskOnly, lowThreshold: base.lowThreshold, highThreshold: base.highThreshold, warnThreshold: base.warnThreshold, requestTimeoutMs: base.backgroundTimeoutMs, screenTimeoutMs: base.screenTimeoutMs, gateTimeoutMs: base.gateTimeoutMs, sessionCallLimit: base.sessionCallLimit, dailyCallLimit: base.dailyCallLimit }, storedFile)
     const problem = validateSettings(merged)
     if (problem) logger?.warn?.(`[dsh-jev-lens] 已存设置不可用（${problem}），改用默认值`)
     else applySettings(merged)
