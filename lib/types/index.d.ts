@@ -149,6 +149,15 @@ export declare function resolveProbeModel(config: Pick<Config, 'abProvider' | 'a
     model: string;
     source: string;
 };
+/** Structural view of `ctx.approval` — only the one read the gate needs. */
+export interface ApprovalLike {
+    /** The session's own `approval/policy` fold, or `undefined` when there is none. */
+    overrideOf(session: never): 'ask' | 'never' | undefined;
+    /** The configured default policy, used when a session has no override. */
+    config?: {
+        policy?: 'ask' | 'never';
+    };
+}
 /** One command's fate, however it was decided. */
 export interface CommandVerdict {
     band: 'allow' | 'revise' | 'block';

@@ -78,6 +78,26 @@ export declare const DEFAULT_GATE_POLICY: GatePolicy;
  */
 export declare function gateAction(band: 'allow' | 'revise' | 'block', restorable: number | undefined, policy?: GatePolicy): GateAction;
 /**
+ * What the gate should do once the session's approval policy is known.
+ *
+ * `ask` is only a real option when somebody can be asked. Under an
+ * `approval: never` session the harness resolves every ask as *rejected* — and
+ * reports it as if the user had declined — so an "ask-only" gate would silently
+ * become a hard block with a false reason. When the question cannot be put to a
+ * human, the honest behaviour is to let the command through and say so in the
+ * ledger; a guard must never manufacture a refusal nobody made.
+ *
+ * @param band - the destructive band from the first question.
+ * @param restorable - the second answer, when asked.
+ * @param policy - the configured gate policy.
+ * @param approval - the session's approval override, or `undefined` when unknown.
+ * @returns the action, plus a degrade reason when the ask could not be delivered.
+ */
+export declare function resolveGateAction(band: 'allow' | 'revise' | 'block', restorable: number | undefined, policy?: GatePolicy, approval?: 'ask' | 'never' | undefined): {
+    action: GateAction;
+    degraded?: string;
+};
+/**
  * The text the model behind the agent reads when the gate refuses or escalates.
  * Advisory in form, and always names which channel decided — a refusal whose
  * provenance is invisible cannot be debugged or trusted.

@@ -38,7 +38,7 @@ import { createJev, redact, JevError, type Jev, type JevQuestion } from './jev.j
 import {
   DESTRUCTIVE_KEY, DESTRUCTIVE_QUESTION, INJECTION_QUESTION, RESTORABLE_KEY,
   DEFAULT_GATE_POLICY, commandQuestions, destructiveBand, destructiveState,
-  gateAction, gateMessage, type GateAction, type GatePolicy,
+  gateAction, resolveGateAction, gateMessage, type GateAction, type GatePolicy,
 } from './questions.js'
 import { buildDrillPayload, buildScreenWarning, detectCanary, makeCanary, type DrillScenario } from './canary.js'
 import { AB_ARMS, buildProbe, judgeReply, type AbArm } from './ab.js'
@@ -310,6 +310,14 @@ export function resolveProbeModel (config: Pick<Config, 'abProvider' | 'abModel'
   return { provider: '', model: '', source: 'missing' }
 }
 
+/** Structural view of `ctx.approval` — only the one read the gate needs. */
+export interface ApprovalLike {
+  /** The session's own `approval/policy` fold, or `undefined` when there is none. */
+  overrideOf (session: never): 'ask' | 'never' | undefined
+  /** The configured default policy, used when a session has no override. */
+  config?: { policy?: 'ask' | 'never' }
+}
+
 /** One command's fate, however it was decided. */
 export interface CommandVerdict {
   band: 'allow' | 'revise' | 'block'
@@ -444,12 +452,22 @@ export function apply (ctx: LensContext, input: Partial<Config> = {}): void {
    * may simply never fire on a profile without it. The plugin then runs on its
    * file and environment sources instead of failing to load.
    */
-  const services: { credentials?: CredentialsService } = {}
+  const services: { credentials?: CredentialsService, approval?: ApprovalLike } = {}
   try {
     ctx.inject?.(['credentials'], (scope: LensContext) => {
       services.credentials = serviceOf<CredentialsService>(scope, 'credentials')
     })
   } catch { /* no credentials service: the key comes from config, env or the local store */ }
+  /*
+   * The approval policy is what decides whether an `ask` can reach a human at
+   * all. Declared through `inject` like any other service; when it is absent the
+   * policy is simply unknown, and unknown keeps the nominal behaviour.
+   */
+  try {
+    ctx.inject?.(['approval'], (scope: LensContext) => {
+      services.approval = serviceOf<ApprovalLike>(scope, 'approval')
+    })
+  } catch { /* no approval seam: treat the policy as unknown */ }
 
   function credentials (): CredentialsService | undefined {
     return services.credentials
@@ -494,6 +512,24 @@ export function apply (ctx: LensContext, input: Partial<Config> = {}): void {
       breaker.ok()
     }
     return jev
+  }
+
+  /**
+   * The session's approval override, or `undefined` when it cannot be read.
+   *
+   * `undefined` is deliberately *not* treated as "never": an unreadable policy
+   * must keep the nominal behaviour rather than quietly disabling the gate.
+   */
+  function approvalPolicyFor (exec: unknown): 'ask' | 'never' | undefined {
+    const service = services.approval
+    const session = (exec as { agent?: { session?: unknown } })?.agent?.session
+    if (!service || typeof service.overrideOf !== 'function' || session === undefined) return undefined
+    try {
+      const policy = service.overrideOf(session as never)
+      return policy === 'never' || policy === 'ask' ? policy : undefined
+    } catch {
+      return undefined
+    }
   }
 
   /** True while every call should fail open instantly instead of asking again. */
@@ -718,8 +754,10 @@ export function apply (ctx: LensContext, input: Partial<Config> = {}): void {
     try {
       const verdict = await verdictFor(exec, { awaited: true })
       if (!verdict) return null // proven harmless, or failed open
-      const action = gateAction(verdict.band, verdict.restorable, config.gatePolicy)
+      const resolved = resolveGateAction(verdict.band, verdict.restorable, config.gatePolicy, approvalPolicyFor(exec))
+      const action = resolved.action
       recordVerdict(exec, verdict, action)
+      if (resolved.degraded) degradedRow('command', resolved.degraded, exec)
       if (action === 'allow') return null
       return action === 'deny'
         ? { kind: 'deny', reason: gateMessage('deny', verdict.band, verdict.p ?? 0, verdict.restorable, verdict.reason) }
@@ -1157,6 +1195,7 @@ export function apply (ctx: LensContext, input: Partial<Config> = {}): void {
       `mode=${config.mode} · model=${config.model} · 判定工具=${config.judgeTools.join(',')} · 筛查工具=${config.screenTools.join(',')}`,
       `阈值 low=${config.lowThreshold} high=${config.highThreshold} warn=${config.warnThreshold} · 第二问=${config.batchedQuestions ? 'on' : 'off'} · 本地规则=${config.prefilter ? 'on' : 'off'}`,
       `闸门策略 ${config.gateAskOnly ? '只升级不拦截（block 也只问，永不硬拦）' : '升级 + 拦截（block 直接拒绝）'}`,
+      `审批链路 ${services.approval ? '可读（approval 服务在）' : '不可读'} · approval=never 时 ask 会降级为放行并记账，绝不静默拦`,
       `超时（硬上限）后台 ${config.backgroundTimeoutMs}ms×${config.backgroundMaxRetries + 1} · 筛查 ${config.screenTimeoutMs}ms · 闸门 ${config.gateTimeoutMs}ms · 探测 ${config.timeoutMs}ms`,
       `并发 后台 ${config.maxConcurrent}（队列上限 ${config.maxQueued}）· 前台 ${config.foregroundConcurrency}（永不排在后台后面）`,
       `熔断 连续 ${config.breakerFailures} 次失败 → 冷却 ${config.breakerCooldownMs}ms · key 失效后静默 ${(config.authCooldownMs / 60000).toFixed(0)} 分钟（fail-open，不再打接口）`,
@@ -1202,6 +1241,15 @@ export function apply (ctx: LensContext, input: Partial<Config> = {}): void {
       auth: auth.fingerprint
         ? { rejected: true, status: auth.status, at: auth.at, cooldownMs: config.authCooldownMs, message: auth.message }
         : { rejected: false },
+      approval: {
+        /** Whether the seam is mounted at all. */
+        available: services.approval !== undefined,
+        /**
+         * The configured default. A per-session override (`ask`/`never`) is read
+         * at decision time, because it belongs to the session, not to the plugin.
+         */
+        defaultPolicy: services.approval?.config?.policy ?? null,
+      },
       settings: {
         enabled: config.mode !== 'off',
         mode: config.mode,

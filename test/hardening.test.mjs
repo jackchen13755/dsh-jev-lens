@@ -15,7 +15,7 @@ import { locallySafe, matchDestructive, prefilter } from '../lib/rules.js'
 import { createCache, keyOf } from '../lib/cache.js'
 import { createBreaker, createLimiter, percentiles } from '../lib/resilience.js'
 import { isRetryableStatus, redact } from '../lib/jev.js'
-import { commandQuestions, destructiveBand, gateAction, gateMessage, RESTORABLE_QUESTION, DESTRUCTIVE_KEY, RESTORABLE_KEY } from '../lib/questions.js'
+import { commandQuestions, destructiveBand, gateAction, resolveGateAction, gateMessage, DEFAULT_GATE_POLICY, RESTORABLE_QUESTION, DESTRUCTIVE_KEY, RESTORABLE_KEY } from '../lib/questions.js'
 import { append, load, render, summarize } from '../lib/ledger.js'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'jev-lens-h-'))
@@ -172,6 +172,28 @@ test('the second question can only relax a revise, never a block', () => {
   // Ask-only: even an unrecoverable block escalates rather than refusing.
   assert.equal(gateAction('block', 0.1, { ask: true, deny: false, allowRestorable: true }), 'ask')
   assert.equal(gateAction('revise', 0.1, { ask: false, deny: true, allowRestorable: true }), 'allow')
+})
+
+test('an ask that cannot reach a human degrades to allow, and says so', () => {
+  /*
+   * Under an `approval: never` session the harness resolves every ask as
+   * rejected and reports it as if the user had declined. An "ask-only" gate
+   * would then be a hard block with a false reason, which is the one thing this
+   * plugin must never become — so the ask degrades to a recorded allow instead.
+   */
+  const ASK_ONLY = { ask: true, deny: false, allowRestorable: true }
+  assert.deepEqual(resolveGateAction('revise', 0.1, DEFAULT_GATE_POLICY, 'never'), { action: 'allow', degraded: 'gate:ask-unavailable' })
+  // Ask-only is the mode where this matters most: a block that cannot be asked
+  // about must not turn into a silent refusal.
+  assert.deepEqual(resolveGateAction('block', 0.1, ASK_ONLY, 'never'), { action: 'allow', degraded: 'gate:ask-unavailable' })
+  assert.deepEqual(resolveGateAction('block', 0.1, ASK_ONLY, 'ask'), { action: 'ask' })
+  // A readable `ask` policy changes nothing…
+  assert.deepEqual(resolveGateAction('revise', 0.1, DEFAULT_GATE_POLICY, 'ask'), { action: 'ask' })
+  // …and an *unknown* policy must keep the nominal behaviour rather than
+  // quietly disabling the gate.
+  assert.deepEqual(resolveGateAction('revise', 0.1, DEFAULT_GATE_POLICY, undefined), { action: 'ask' })
+  // A deny is never rewritten by this rule: refusing does not need a human.
+  assert.deepEqual(resolveGateAction('block', 0.1, DEFAULT_GATE_POLICY, 'never'), { action: 'deny' })
 })
 
 test('a refusal names its provenance and never reads as a silent no-op', () => {
