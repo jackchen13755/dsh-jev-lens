@@ -152,6 +152,21 @@ test('the card actually renders the API-key box, the mode selector and the timeo
   const buttons = find(tree, (node) => node.type === 'button')
   assert.ok(buttons.length >= 3, 'save key, save settings, test')
 
+  /*
+   * Every control the host understands must be reachable from the card. This
+   * assertion exists because a string patch once landed the *label* without the
+   * checkbox: the suite stayed green while the UI silently lacked the control,
+   * and only a screenshot caught it.
+   */
+  const checkboxes = find(tree, (node) => node.type === 'input' && node.props.type === 'checkbox')
+  const rendered = JSON.stringify(tree)
+  assert.equal(checkboxes.length, 3, 'judge commands, second question, ask-only gate')
+  // Labels, not setting keys: the keys live inside the change handlers, which
+  // are functions and therefore absent from the rendered tree.
+  for (const label of ['判定 shell 命令', '追加第二问', '只升级不拦截']) {
+    assert.ok(rendered.includes(label), `the card must render “${label}”`)
+  }
+
   // The compact view is a one-liner, not a second card.
   const summary = card({ view: 'summary' })
   assert.equal(typeof summary.type, 'string')

@@ -496,7 +496,8 @@ window.__ModuleLoader__.load({
           modeSelect,
           h('div', { style: muted }, t.modeHelp),
           toggle(t.judge, settings !== null && settings.judgeCommands === true, disabled, (next) => { void write('/config', { judgeCommands: next }, t.savedConfig) }),
-          toggle(t.batched, settings !== null && settings.batchedQuestions === true, disabled, (next) => { void write('/config', { batchedQuestions: next }, t.savedConfig) }))
+          toggle(t.batched, settings !== null && settings.batchedQuestions === true, disabled, (next) => { void write('/config', { batchedQuestions: next }, t.savedConfig) }),
+          toggle(t.gateAskOnly, settings !== null && settings.gateAskOnly === true, disabled, (next) => { void write('/config', { gateAskOnly: next }, t.savedConfig) }))
 
         // The knobs that answer "don't hang on a dead key".
         const onDraft = (field_, raw) => {
