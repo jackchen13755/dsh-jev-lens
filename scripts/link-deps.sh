@@ -19,12 +19,16 @@ DSH_HOME_DIR="${DSH_HOME:-$HOME/.dsh}"
 search () { # $1 = path under a node_modules directory
   local dir global
   for dir in \
-    "$ROOT/node_modules/$1" \
     "$DSH_HOME_DIR"/profiles/*/node_modules/"$1" \
     "$HOME"/.npm/_npx/*/node_modules/"$1" \
     /usr/local/lib/node_modules/"$1" \
     /opt/homebrew/lib/node_modules/"$1"; do
-    if [ -d "$dir" ]; then printf '%s\n' "$dir"; return 0; fi
+    # Never match the destination we are about to write: `ln -sfn` on an existing
+    # link whose target is its own path produces a self-referential symlink, and a
+    # broken link is exactly what this script exists to avoid.
+    if [ -d "$dir" ] && [ "$(cd "$dir" 2>/dev/null && pwd -P)" != "$(cd "$ROOT/node_modules/$1" 2>/dev/null && pwd -P)" ]; then
+      printf '%s\n' "$dir"; return 0
+    fi
   done
   global="$(npm root -g 2>/dev/null || true)"
   if [ -n "$global" ] && [ -d "$global/$1" ]; then printf '%s\n' "$global/$1"; return 0; fi
