@@ -1,0 +1,20 @@
+# dsh-jev-lens bundle layer: Jev as a measurable judgment inside DeepSeek Harness.
+#
+# Mounts one host plugin, which contributes:
+#   1. shadow accounting of a Jev judgment on every shell command (never blocks)
+#   2. screening of fetched content for injected instructions
+#   3. canary drills and a three-arm batch probe — the causal channels
+#   4. ledger, report, doctor tools and the /jev-lens command
+#   5. an optional settings card (Settings -> Jev 实验台) that stores the API key
+#
+# Requires a TypeSafe API key. With none configured the plugin still mounts,
+# every capability stays completely inert, and no network request is made.
+#
+# Privacy: once a key is configured, judged command text and fetched page content
+# are sent to api.typesafe.ai after a redaction pass (home paths, e-mails, tokens,
+# internal host suffixes; add your own with `redactExtra`). The ledger records
+# metadata only — probabilities, latency, token counts, skip reasons — never
+# command or page bodies. Set `mode: off` to stop everything immediately.
+- insert:
+    - id: jev-lens
+      name: '@dsh-external/dsh-jev-lens'

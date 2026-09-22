@@ -1,0 +1,71 @@
+{
+  "name": "@dsh-external/dsh-jev-lens",
+  "version": "0.1.0",
+  "description": "Jev quality bench for DeepSeek Harness: shadow-accounted dangerous-command judging, injection screening for fetched content, canary A/B drills, and an optional gate mode — with the ledger, the report and the settings card needed to judge whether any of it is worth keeping.",
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "files": [
+    "lib",
+    "client",
+    "scripts",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "cordis",
+    "jev",
+    "typesafe",
+    "guard",
+    "prompt-injection",
+    "classifier",
+    "agent-safety"
+  ],
+  "license": "BSD-3-Clause",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jackchen13755/dsh-jev-lens.git"
+  },
+  "homepage": "https://github.com/jackchen13755/dsh-jev-lens#readme",
+  "bugs": {
+    "url": "https://github.com/jackchen13755/dsh-jev-lens/issues"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-llm": ">=0.0.1-rc <2",
+    "@deepseek-ai/dsh-tools": ">=0.0.1-rc <2",
+    "cordis": ">=4.0.0-rc <5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "typescript": "^5.9.0"
+  },
+  "scripts": {
+    "build": "bash scripts/build.sh",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/",
+    "ledger": "node scripts/ledger-view.mjs",
+    "link-deps": "bash scripts/link-deps.sh",
+    "prepare": "bash scripts/build.sh || node -e \"console.log('prepare: build skipped — the committed lib/ is used as-is; run npm run build to refresh it')\""
+  }
+}

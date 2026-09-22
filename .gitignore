@@ -1,0 +1,10 @@
+node_modules/
+*.tsbuildinfo
+*.tgz
+
+# Runtime state this plugin writes lives OUTSIDE the checkout, under
+# $DSH_HOME/storages/dsh_jev_lens (ledger-*.jsonl, config.json, secret.json).
+# These patterns are belt-and-braces: nothing here may ever hold a key or a ledger.
+config.json
+secret.json
+ledger-*.jsonl
