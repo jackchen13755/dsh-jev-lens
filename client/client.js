@@ -82,6 +82,7 @@ window.__ModuleLoader__.load({
         rowScreen: (n, hit, rate, p50, p95) => `页面筛查 ${n} 次 · 命中 ${hit} (${rate}) · 等待 p50 ${p50}ms / p95 ${p95}ms（预算 1200ms）`,
         rowCanary: (bare, bn, warn, wn) => `金丝雀  bare ${bare}/${bn} 被劫持 · warn ${warn}/${wn}`,
         rowBatch: (arms) => `批量对照 ${arms}`,
+        rowCoverage: (rate, judged, skipped, why) => `判定 ${judged} · 跳过 ${skipped}（${Math.round(rate * 100)}%）${why ? ` — 主因：${why}` : ''}`,
         rowCost: (usd, cached, ruled, skipped, degraded, errors) => `成本 $${usd} · 免费路径 缓存${cached}/规则${ruled}/跳过${skipped} · 降级 ${degraded} · 失败 ${errors}`,
         lblJudge: '判定',
         lblHurt: '误伤',
@@ -90,11 +91,13 @@ window.__ModuleLoader__.load({
         lblCanary: '金丝雀',
         lblBatch: '批量对照',
         lblCost: '成本/健康',
+        lblCoverage: '判定覆盖',
         verdictOk: '结论：判定有排序能力、误伤可接受 —— 可继续 shadow，再考虑 gate',
         verdictWarn: '结论：能用，但有黄色项要留意（先别开 gate）',
         verdictBad: '结论：不建议开 gate（误伤或排序能力不达标）',
         verdictThin: '结论：样本不足 —— 先让它跑一天（有结果对照 ≥10 才谈得上结论）',
         verdictNoData: '结论：还没有判定数据',
+        verdictLowCoverage: (rate) => `结论：判定覆盖只有 ${Math.round(rate * 100)}% —— 先别下结论：覆盖不足会伪装成"没问题"`,
         verdictBlind: '结论：仪器当前不可用 —— 有失败记录且没有一条成功判定（查 key / 网络）',
         verdictNoKey: '结论：key 被拒，所有判定已跳过（fail-open，不影响 agent 干活）',
         privacy: '隐私：开启后，被判定的命令文本与抓取到的网页内容会发送到 api.typesafe.ai；发送前做脱敏'
@@ -147,6 +150,7 @@ window.__ModuleLoader__.load({
         rowScreen: (n, hit, rate, p50, p95) => `screened ${n} · flagged ${hit} (${rate}) · wait p50 ${p50}ms / p95 ${p95}ms (budget 1200ms)`,
         rowCanary: (bare, bn, warn, wn) => `canary  bare ${bare}/${bn} hijacked · warn ${warn}/${wn}`,
         rowBatch: (arms) => `batch probe ${arms}`,
+        rowCoverage: (rate, judged, skipped, why) => `judged ${judged} · skipped ${skipped} (${Math.round(rate * 100)}%)${why ? ` — top: ${why}` : ''}`,
         rowCost: (usd, cached, ruled, skipped, degraded, errors) => `cost $${usd} · free paths cache ${cached}/rules ${ruled}/skips ${skipped} · degraded ${degraded} · failures ${errors}`,
         lblJudge: 'judged',
         lblHurt: 'false positives',
@@ -155,11 +159,13 @@ window.__ModuleLoader__.load({
         lblCanary: 'canary',
         lblBatch: 'batch probe',
         lblCost: 'cost / health',
+        lblCoverage: 'coverage',
         verdictOk: 'Verdict: the score orders outcomes and false positives are acceptable — stay in shadow, then consider gate',
         verdictWarn: 'Verdict: usable, but the amber rows need attention (do not enable gate yet)',
         verdictBad: 'Verdict: do not enable gate — false positives or ordering are not good enough',
         verdictThin: 'Verdict: not enough data — let it run a day (≥10 paired outcomes before any conclusion)',
         verdictNoData: 'Verdict: no judgments yet',
+        verdictLowCoverage: (rate) => `Verdict: only ${Math.round(rate * 100)}% of calls were judged — an unmeasured window looks exactly like a clean one`,
         verdictBlind: 'Verdict: the instrument is currently blind — failures with zero successful judgments (check key / network)',
         verdictNoKey: 'Verdict: the key is rejected, every judgment is skipped (fail-open; the agent keeps working)',
         privacy: 'Privacy: once enabled, judged command text and fetched page content go to api.typesafe.ai; '
@@ -301,9 +307,21 @@ window.__ModuleLoader__.load({
         text: t.rowCost(report.cost.usd, c.cached, c.ruled, c.skipped, report.health.degraded, report.health.errors),
       })
 
+      /*
+       * Coverage is reported before the verdict and can veto a green light:
+       * "0 false positives" from a window where most calls were skipped is not a
+       * result, it is the absence of one.
+       */
+      const cov = report.coverage
+      if (cov && cov.skipped > 0) {
+        const why = (cov.topReasons ?? []).slice(0, 3).map((r) => `${r.reason}×${r.n}`).join(' · ')
+        rows.push({ level: cov.rate < 0.8 ? 'warn' : 'ok', label: t.lblCoverage, text: t.rowCoverage(cov.rate, cov.judged, cov.skipped, why) })
+      }
+
       let overall
       if (key !== null && key.rejected === true) overall = { level: 'bad', text: t.verdictNoKey }
       else if (blind) overall = { level: 'bad', text: t.verdictBlind }
+      else if (cov && cov.rate < 0.6) overall = { level: 'warn', text: t.verdictLowCoverage(cov.rate) }
       else if (c.n === 0) overall = { level: 'unknown', text: t.verdictNoData }
       else if (c.withOutcome < 10) overall = { level: 'unknown', text: t.verdictThin }
       else {

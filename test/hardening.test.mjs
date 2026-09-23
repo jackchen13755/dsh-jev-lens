@@ -174,6 +174,31 @@ test('the second question can only relax a revise, never a block', () => {
   assert.equal(gateAction('revise', 0.1, { ask: false, deny: true, allowRestorable: true }), 'allow')
 })
 
+test('coverage is reported, and it cannot be faked by a healthy-looking window', () => {
+  /*
+   * The failure this guards against is the one measured on 2026-09-23: 70 commands
+   * judged and 55 skipped in a day (21% coverage), which a report leading with
+   * "0 problems" would have presented as a clean bill of health.
+   */
+  const records = [
+    ...Array.from({ length: 21 }, (_, i) => ({ t: i, kind: 'command', p: 0.02, band: 'allow', decision: 'allow', via: 'jev' })),
+    ...Array.from({ length: 49 }, (_, i) => ({ t: 100 + i, kind: 'degraded', where: 'command', reason: 'auth:rejected-403' })),
+    ...Array.from({ length: 6 }, (_, i) => ({ t: 200 + i, kind: 'degraded', where: 'command', reason: 'degraded:breaker-open' })),
+  ]
+  const report = summarize(records, 1)
+  assert.equal(report.coverage.judged, 21)
+  assert.equal(report.coverage.skipped, 55)
+  assert.equal(report.coverage.rate, 0.276)
+  assert.deepEqual(report.coverage.topReasons[0], { reason: 'auth:rejected-403', n: 49 })
+  const text = render(report)
+  assert.match(text, /判定覆盖 28%/, 'coverage leads the report')
+  assert.match(text, /auth:rejected-403×49/, 'and names why')
+  // Nothing skipped is a real 100%, not a missing number.
+  const clean = summarize([{ t: 1, kind: 'command', p: 0.1, band: 'allow', decision: 'allow', via: 'jev' }], 1)
+  assert.equal(clean.coverage.rate, 1)
+  assert.match(render(clean), /无跳过/)
+})
+
 test('an ask that cannot reach a human degrades to allow, and says so', () => {
   /*
    * Under an `approval: never` session the harness resolves every ask as

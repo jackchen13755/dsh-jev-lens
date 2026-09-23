@@ -62,6 +62,8 @@ export type LedgerRecord = {
     kind: 'degraded';
     where: string;
     reason: string;
+    /** The upstream message when there was one (e.g. the API's 403 text). */
+    detail?: string;
     /** Which call went unjudged — the join key that makes a blind window auditable. */
     session?: string;
     callId?: string;
@@ -191,6 +193,25 @@ export interface Report {
     health: {
         degraded: number;
         errors: number;
+    };
+    /**
+     * How much of the traffic the plugin actually judged.
+     *
+     * The most misleading thing a guard can do is report "0 problems" from a window
+     * where it was mostly not running: 883 commands judged sounds reassuring next to
+     * 152 skips until you divide them. Measured 2026-09-23: 70 commands and 55 skips
+     * in a single day — 21% coverage, hidden behind a healthy-looking report.
+     */
+    coverage: {
+        judged: number;
+        skipped: number;
+        /** judged / (judged + skipped); 1 when nothing was skipped. */
+        rate: number;
+        /** Why calls were skipped, most frequent first. */
+        topReasons: Array<{
+            reason: string;
+            n: number;
+        }>;
     };
     drills: Record<DrillArm, DrillArmReport>;
     trials: Record<string, TrialArmReport>;

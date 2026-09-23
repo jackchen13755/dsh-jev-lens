@@ -189,7 +189,13 @@ const DEFAULTS: Required<Config> = {
   lowThreshold: 0.5,
   highThreshold: 0.7,
   warnThreshold: 0.75,
-  sessionCallLimit: 300,
+  /*
+   * Raised from 300 after the coverage metric showed what the old cap cost: 25 of
+   * 154 skips in one window were `budget:session-limit`, i.e. the guard had quietly
+   * stopped judging a long session. The daily cap (2000) is the real cost ceiling;
+   * a session cap below it only creates blind spots.
+   */
+  sessionCallLimit: 1000,
   dailyCallLimit: 2000,
   maxScreenChars: 8000,
   timeoutMs: 20_000,
@@ -533,10 +539,23 @@ export function apply (ctx: LensContext, input: Partial<Config> = {}): void {
   }
 
   /** True while every call should fail open instantly instead of asking again. */
+  /**
+   * How long to stay quiet after a rejection.
+   *
+   * 401 and 403 are not the same thing and must not share a cooldown: 401 means the
+   * key is wrong (fix it, do not hammer), while 403 means the request was refused —
+   * quota, plan, a temporary block — and a long silence there silently guts the
+   * guard's coverage. Measured 2026-09-23: 49 judgments skipped by a 403 window
+   * spread over an hour, visible only as `degraded` rows.
+   */
+  function cooldownFor (status: number): number {
+    return status === 403 ? Math.min(config.authCooldownMs, 30_000) : config.authCooldownMs
+  }
+
   function authBlocked (): boolean {
     if (!auth.fingerprint) return false
     if (auth.fingerprint !== key.fingerprint) { auth.fingerprint = ''; return false }
-    if (Date.now() - auth.at >= config.authCooldownMs) { auth.fingerprint = ''; return false }
+    if (Date.now() - auth.at >= cooldownFor(auth.status)) { auth.fingerprint = ''; return false }
     reason(`auth:rejected-${auth.status}`)
     return true
   }
@@ -547,7 +566,11 @@ export function apply (ctx: LensContext, input: Partial<Config> = {}): void {
     auth.fingerprint = key.fingerprint
     auth.at = Date.now()
     auth.status = error.status
-    auth.message = error.message.slice(0, 200)
+    /*
+     * Keep the upstream text: a status code alone cannot tell "quota exhausted"
+     * from "key revoked", and those need different actions from the reader.
+     */
+    auth.message = error.message.slice(0, 300)
     reason(`auth:rejected-${error.status}`)
   }
 
@@ -560,13 +583,16 @@ export function apply (ctx: LensContext, input: Partial<Config> = {}): void {
    * process, and the alternatives (recording the skip as `p=0`, or as nothing at
    * all) are a lie or a hole. One row per skipped call, matching `command-skip`.
    */
-  function degradedRow (where: string, why: string, exec: unknown): void {
+  function degradedRow (where: string, why: string, exec: unknown, detail?: string): void {
     try {
       append(ledgerDir, {
         t: Date.now(),
         kind: 'degraded',
         where,
         reason: why,
+        // The upstream text, when there was one: "403" alone cannot tell a
+        // exhausted quota from a revoked key.
+        ...(detail ? { detail: detail.slice(0, 300) } : {}),
         session: sessionOf(exec),
         callId: (exec as { callId?: string })?.callId,
       })
@@ -648,7 +674,7 @@ export function apply (ctx: LensContext, input: Partial<Config> = {}): void {
       }
     }
 
-    if (authBlocked()) { degradedRow('command', `auth:rejected-${auth.status}`, exec); return null }
+    if (authBlocked()) { degradedRow('command', `auth:rejected-${auth.status}`, exec, auth.message); return null }
     const transport = await ensureJev()
     if (!transport) { reason('no-key'); degradedRow('command', 'no-key', exec); return null }
     if (breaker.isOpen()) { reason('degraded:breaker-open'); degradedRow('command', 'degraded:breaker-open', exec); return null }

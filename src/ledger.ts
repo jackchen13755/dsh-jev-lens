@@ -47,6 +47,8 @@ export type LedgerRecord =
   }
   | {
     t: number; kind: 'degraded'; where: string; reason: string
+    /** The upstream message when there was one (e.g. the API's 403 text). */
+    detail?: string
     /** Which call went unjudged — the join key that makes a blind window auditable. */
     session?: string; callId?: string
   }
@@ -145,6 +147,22 @@ export interface Report {
   /** Does `p` actually order commands by how they turned out? Rank separation, not calibration. */
   rank: RankReport
   health: { degraded: number; errors: number }
+  /**
+   * How much of the traffic the plugin actually judged.
+   *
+   * The most misleading thing a guard can do is report "0 problems" from a window
+   * where it was mostly not running: 883 commands judged sounds reassuring next to
+   * 152 skips until you divide them. Measured 2026-09-23: 70 commands and 55 skips
+   * in a single day — 21% coverage, hidden behind a healthy-looking report.
+   */
+  coverage: {
+    judged: number
+    skipped: number
+    /** judged / (judged + skipped); 1 when nothing was skipped. */
+    rate: number
+    /** Why calls were skipped, most frequent first. */
+    topReasons: Array<{ reason: string, n: number }>
+  }
   drills: Record<DrillArm, DrillArmReport>
   trials: Record<string, TrialArmReport>
   trialBatch: { id: string; batches: number }
@@ -321,6 +339,19 @@ export function summarize (records: LedgerRecord[], days: number, usdPerMTok = 0
       degraded: records.filter(r => r.kind === 'degraded').length,
       errors: records.filter(r => r.kind === 'error').length,
     },
+    coverage: (() => {
+      const judged = records.filter(r => r.kind === 'command').length
+      const skips = records.filter((r): r is Extract<LedgerRecord, { kind: 'degraded' }> => r.kind === 'degraded')
+      const byReason = new Map<string, number>()
+      for (const skip of skips) byReason.set(skip.reason, (byReason.get(skip.reason) ?? 0) + 1)
+      const total = judged + skips.length
+      return {
+        judged,
+        skipped: skips.length,
+        rate: total === 0 ? 1 : Number((judged / total).toFixed(3)),
+        topReasons: [...byReason.entries()].map(([reason, n]) => ({ reason, n })).sort((a, b) => b.n - a.n).slice(0, 5),
+      }
+    })(),
     drills: { bare: arm('bare'), warn: arm('warn') },
     trials: trialArms,
     trialBatch: { id: latestBatch, batches: new Set(allTrials.map(r => r.batch)).size },
@@ -403,6 +434,12 @@ export function render (report: Report): string {
     report.gates.ask || report.gates.deny || report.gates.allow
       ? `**E. 闸门（gate 模式）** allow=${report.gates.allow} · **升级给用户 ${report.gates.ask}** · **拦截 ${report.gates.deny}**`
       : '',
+    // Coverage first: a report that leads with "everything is fine" while 79% of
+    // the traffic went unjudged is worse than no report.
+    report.coverage.skipped
+      ? `⚠️ **判定覆盖 ${(report.coverage.rate * 100).toFixed(0)}%**（判定 ${report.coverage.judged} · 跳过 ${report.coverage.skipped}）${
+        report.coverage.topReasons.length ? ` — 主因：${report.coverage.topReasons.map(r => `${r.reason}×${r.n}`).join(' · ')}` : ''}`
+      : `判定覆盖 ${(report.coverage.rate * 100).toFixed(0)}%（判定 ${report.coverage.judged} · 无跳过）`,
     report.health.degraded || report.health.errors
       ? `⚠️ 降级 ${report.health.degraded} 次（熔断/预算，已瞬间 fail-open）· 判定失败 ${report.health.errors} 条（Jev 不可用/超时），不影响任务`
       : '无降级、无判定失败',
