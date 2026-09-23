@@ -1372,7 +1372,19 @@ export function apply (ctx: LensContext, input: Partial<Config> = {}): void {
           handler: async (req: WebRequestLike, res: WebResponseLike) => {
             const route = new URL(req.url ?? '/', 'http://127.0.0.1').pathname.slice(API_PREFIX.length).replace(/^\/+/, '')
             try {
-              if (req.method === 'GET' && (route === 'status' || route === '')) { send(res, 200, statusPayload()); return }
+              if (req.method === 'GET' && (route === 'status' || route === '')) {
+                /*
+                 * Resolve the credential before reporting it. The key is resolved
+                 * lazily on first use, so a freshly loaded plugin used to answer
+                 * "not configured" while the credential store was perfectly fine —
+                 * a status that lies about its own state right after every restart.
+                 * (Found by checking the live status after deploying 0.3.0; the same
+                 * bug was fixed in dsh-jev-kit earlier.)
+                 */
+                await ensureJev()
+                send(res, 200, statusPayload())
+                return
+              }
               if (req.method === 'GET' && route === 'report') {
                 /*
                  * The aggregate only. The ledger's raw rows carry a redacted
