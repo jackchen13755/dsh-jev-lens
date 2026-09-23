@@ -34,6 +34,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { createJev, redact, JevError, type Jev, type JevQuestion } from '@dsh-external/dsh-jev-core'
 import {
   DESTRUCTIVE_KEY, DESTRUCTIVE_QUESTION, INJECTION_QUESTION, RESTORABLE_KEY,
@@ -1082,7 +1083,16 @@ export function apply (ctx: LensContext, input: Partial<Config> = {}): void {
           ...decision,
           additionalContexts: [
             ...(decision.additionalContexts ?? []),
-            ...notes.map(text => ({ role: 'user', content: [{ type: 'text', text }] })),
+            ...notes.map(text => createUserMessage({
+              content: [{ type: 'text', text }],
+              /*
+               * `MessageSourceMap.plugin` carries the producer's identity in its own
+               * field — `kind` is the (merge-extensible) union member, not a
+               * `plugin:<name>` string. The original attempt folded both into `kind`,
+               * which is why this file compiled only in the sense that nobody built it.
+               */
+              source: { kind: 'plugin', plugin: '@dsh-external/dsh-jev-lens' },
+            })),
           ],
         }
       }

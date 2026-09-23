@@ -7,7 +7,8 @@
 # whatever harness is already installed here instead of downloading a second copy.
 #
 # Every location is discovered; nothing is hard-coded to one machine. Override
-# with DSH_TOOLS=/path/to/@deepseek-ai/dsh-tools and NODE_TYPES=/path/to/@types/node.
+# with DSH_TOOLS=/path/to/@deepseek-ai/dsh-tools, DSH_LLM=/path/to/@deepseek-ai/dsh-llm
+# and NODE_TYPES=/path/to/@types/node.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -42,6 +43,18 @@ if [ -z "$DSH_TOOLS" ] || [ ! -d "$DSH_TOOLS" ]; then
   exit 1
 fi
 
+# @deepseek-ai/dsh-llm is a peer dependency the plugin imports for the note channel
+# (`createUserMessage`, used to attach a screening/triage note to a tool result). The
+# harness resolves it at runtime, which is why it went unnoticed for a while — but the
+# compiler needs its types, and without the link `npm run build` dies on TS2307 while
+# `node --test` dies on ERR_MODULE_NOT_FOUND at import time.
+DSH_LLM="${DSH_LLM:-$(search @deepseek-ai/dsh-llm || true)}"
+if [ -z "$DSH_LLM" ] || [ ! -d "$DSH_LLM" ]; then
+  echo "link-deps: cannot find @deepseek-ai/dsh-llm on this machine." >&2
+  echo "           Run 'npm install' in this checkout, or set DSH_LLM=/path/to/it." >&2
+  exit 1
+fi
+
 NODE_TYPES="${NODE_TYPES:-$(search @types/node || true)}"
 if [ -z "$NODE_TYPES" ] || [ ! -d "$NODE_TYPES" ]; then
   echo "link-deps: cannot find @types/node on this machine." >&2
@@ -50,6 +63,8 @@ if [ -z "$NODE_TYPES" ] || [ ! -d "$NODE_TYPES" ]; then
 fi
 
 ln -sfn "$DSH_TOOLS" node_modules/@deepseek-ai/dsh-tools
+ln -sfn "$DSH_LLM" node_modules/@deepseek-ai/dsh-llm
 ln -sfn "$NODE_TYPES" node_modules/@types/node
 echo "linked: dsh-tools   → $DSH_TOOLS"
+echo "linked: dsh-llm     → $DSH_LLM"
 echo "linked: @types/node → $NODE_TYPES"
