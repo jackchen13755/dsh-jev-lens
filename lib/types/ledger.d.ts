@@ -85,6 +85,20 @@ export type LedgerRecord = {
     tool: string;
     chars: number;
     reason: string;
+}
+/**
+ * An automatic test-failure triage. Separate from `screen` on purpose: the two
+ * observers answer different questions on different events, and a report that merged
+ * them could not say which entry is worth keeping.
+ */
+ | {
+    t: number;
+    kind: 'triage';
+    where: string;
+    signature: string;
+    level?: string;
+    ms: number;
+    values?: Record<string, unknown>;
 } | {
     t: number;
     kind: 'drill-start';

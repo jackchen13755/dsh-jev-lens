@@ -47,6 +47,7 @@ import { append, ledgerFile, load, render, summarize, type DrillArm, type Ledger
 import { prefilter } from './rules.js'
 import { createCache, keyOf, type Cache } from '@dsh-external/dsh-jev-core'
 import { createBreaker, createLimiter, percentiles } from '@dsh-external/dsh-jev-core'
+import { detectTestFailure, renderTriage } from './test-triage.js'
 import { serviceOf, type CredentialsService, type Logger, type WebRequestLike, type WebResponseLike, type WebServerLike } from '@dsh-external/dsh-jev-core'
 import {
   DEFAULT_API_KEY_REF, LENS_DEFAULTS, loadSecret, loadStored, mergeSettings, saveSecret, saveStored,
@@ -121,6 +122,18 @@ export interface Config {
   /** Tools whose calls get the destructive question. `bash` only by default. */
   judgeTools: string[]
   screenTools: string[]
+  /**
+   * Automatically triage failing test runs.
+   *
+   * An observer, not a gate: it appends one line to the tool result and never blocks.
+   * Default on, because the alternative — remembering to ask — is what kept a
+   * perfectly separated `flaky` channel at zero calls for its whole life.
+   */
+  autoTriage: boolean
+  /** Where the channel wording lives (the kit owns channels; this plugin owns events). */
+  triageEndpoint: string
+  /** Hard cap per session: an observer on a frequent event must never become a bill. */
+  triagePerSession: number
   lowThreshold: number
   highThreshold: number
   warnThreshold: number
@@ -187,6 +200,9 @@ const DEFAULTS: Required<Config> = {
   judgeCommands: true,
   judgeTools: ['bash'],
   screenTools: ['fetch_page', 'web_fetch', 'web_search'],
+  autoTriage: true,
+  triageEndpoint: 'http://127.0.0.1:3080/dsh-jev-kit/api/triage',
+  triagePerSession: 12,
   lowThreshold: 0.5,
   highThreshold: 0.7,
   warnThreshold: 0.75,
@@ -1053,19 +1069,102 @@ export function apply (ctx: LensContext, input: Partial<Config> = {}): void {
           state.history.set(session, byCommand)
         }
       }
-      const warning = await screen(exec, result)
-      if (warning && decision?.kind === 'accept') {
+      /*
+       * Two observers, one return path: the screening verdict for fetched pages and the
+       * triage verdict for failing test runs. Both are advisory text appended to the
+       * tool result — neither can block, and a failure in either leaves the transcript
+       * exactly as it was.
+       */
+      const notes = [await screen(exec, result), await triage(exec, result)]
+        .filter((note): note is string => typeof note === 'string' && note.length > 0)
+      if (notes.length && decision?.kind === 'accept') {
         return {
           ...decision,
           additionalContexts: [
             ...(decision.additionalContexts ?? []),
-            { role: 'user', content: [{ type: 'text', text: warning }] },
+            ...notes.map(text => ({ role: 'user', content: [{ type: 'text', text }] })),
           ],
         }
       }
     } catch { /* fail open */ }
     return decision
   }), 'jev-lens post-execute observer')
+
+  /**
+   * Test-failure observer.
+   *
+   * Costs one HTTP call to a local plugin (which makes one Jev call), cached by the
+   * failure's own signature, capped per session, silent when the kit is absent. Every
+   * safeguard here is a consequence of *frequency* rather than of risk: this fires on
+   * the most common event in the workflow, so a watcher re-running a suite must not
+   * turn into a stream of judgments.
+   */
+  const triageSeen = new Set<string>()
+  let triageCalls = 0
+
+  async function triage (exec: unknown, result: unknown): Promise<string | null> {
+    if (!config.autoTriage) return null
+    if (config.mode === 'off') return null
+    const e = exec as { callId?: string, name?: string, arguments?: { command?: unknown } }
+    /*
+     * `resultText` knows the harness's result shape (`{content: [{type:'text',text}]}`).
+     * The first version of this used `JSON.stringify(result)`, which yields the whole
+     * envelope with escaped newlines — every `^`-anchored failure marker stops matching,
+     * and the observer silently declines. Measured: a failing suite produced no triage
+     * row at all. The fallback stays for tools that return a plain string.
+     */
+    const text = resultText(result) || (typeof result === 'string' ? result : '')
+    const signal = detectTestFailure({
+      name: e?.name,
+      command: typeof e.arguments?.command === 'string' ? e.arguments.command : '',
+      text,
+      isError: (result as { isError?: boolean })?.isError === true,
+    })
+    if (!signal) {
+      /*
+       * "Saw a failure and declined" must be visible, or the next person debugging this
+       * observer is guessing exactly like I was. One row, only when the text really
+       * looks test-shaped.
+       */
+      if (text.length > 40 && /\bFAIL\b|failed|AssertionError|panicked at/.test(text)) {
+        append(ledgerDir, { t: Date.now(), kind: 'degraded', where: 'triage', reason: 'triage:declined', detail: `${e?.name ?? '?'} · ${text.length} 字符` })
+      }
+      return null
+    }
+    if (triageSeen.has(signal.signature)) {
+      append(ledgerDir, { t: Date.now(), kind: 'degraded', where: 'triage', reason: 'triage:cached' })
+      return null
+    }
+    if (triageCalls >= config.triagePerSession) {
+      append(ledgerDir, { t: Date.now(), kind: 'degraded', where: 'triage', reason: 'triage:session-limit' })
+      return null
+    }
+    triageSeen.add(signal.signature)
+    triageCalls++
+    const started = Date.now()
+    try {
+      const response = await fetch(config.triageEndpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ channel: 'flaky', items: [signal.excerpt], context: `lens:${sessionOf(exec)}`, task: signal.command }),
+        signal: AbortSignal.timeout(60_000),
+      })
+      if (!response.ok) {
+        append(ledgerDir, { t: Date.now(), kind: 'degraded', where: 'triage', reason: `triage:http-${response.status}` })
+        return null
+      }
+      const body = await response.json() as { findings?: Array<{ level?: string, headline?: string, values?: Record<string, unknown> }> }
+      append(ledgerDir, {
+        t: Date.now(), kind: 'triage', where: signal.command || signal.runner, signature: signal.signature,
+        level: body.findings?.[0]?.level, ms: Date.now() - started, values: body.findings?.[0]?.values,
+      })
+      return renderTriage(signal, body)
+    } catch (error) {
+      // "No kit installed" is the normal case for someone who only wants the guard.
+      append(ledgerDir, { t: Date.now(), kind: 'degraded', where: 'triage', reason: 'triage:unreachable', detail: String((error as Error)?.message ?? error).slice(0, 120) })
+      return null
+    }
+  }
 
   /* ── human operations, shared by the slash command and the tools ─────── */
 

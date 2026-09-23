@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-jev-lens",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Jev quality bench for DeepSeek Harness: shadow-accounted dangerous-command judging, injection screening for fetched content, canary A/B drills, and an optional gate mode — with the ledger, the report and the settings card needed to judge whether any of it is worth keeping.",
   "type": "module",
   "main": "./lib/index.js",

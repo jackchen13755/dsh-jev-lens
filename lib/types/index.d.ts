@@ -57,6 +57,18 @@ export interface Config {
     /** Tools whose calls get the destructive question. `bash` only by default. */
     judgeTools: string[];
     screenTools: string[];
+    /**
+     * Automatically triage failing test runs.
+     *
+     * An observer, not a gate: it appends one line to the tool result and never blocks.
+     * Default on, because the alternative — remembering to ask — is what kept a
+     * perfectly separated `flaky` channel at zero calls for its whole life.
+     */
+    autoTriage: boolean;
+    /** Where the channel wording lives (the kit owns channels; this plugin owns events). */
+    triageEndpoint: string;
+    /** Hard cap per session: an observer on a frequent event must never become a bill. */
+    triagePerSession: number;
     lowThreshold: number;
     highThreshold: number;
     warnThreshold: number;
