@@ -12,9 +12,9 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { locallySafe, matchDestructive, prefilter } from '../lib/rules.js'
-import { createCache, keyOf } from '../lib/cache.js'
-import { createBreaker, createLimiter, percentiles } from '../lib/resilience.js'
-import { isRetryableStatus, redact } from '../lib/jev.js'
+import { createCache, keyOf } from '@dsh-external/dsh-jev-core'
+import { createBreaker, createLimiter, percentiles } from '@dsh-external/dsh-jev-core'
+import { isRetryableStatus, redact } from '@dsh-external/dsh-jev-core'
 import { commandQuestions, destructiveBand, gateAction, resolveGateAction, gateMessage, DEFAULT_GATE_POLICY, RESTORABLE_QUESTION, DESTRUCTIVE_KEY, RESTORABLE_KEY } from '../lib/questions.js'
 import { append, load, render, summarize } from '../lib/ledger.js'
 

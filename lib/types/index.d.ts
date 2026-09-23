@@ -1,7 +1,7 @@
 /// <reference types="node" resolution-mode="require"/>
 /// <reference types="node" resolution-mode="require"/>
 import { type GatePolicy } from './questions.js';
-import { type Logger, type WebServerLike } from './host.js';
+import { type Logger, type WebServerLike } from '@dsh-external/dsh-jev-core';
 export declare const name = "@dsh-external/dsh-jev-lens";
 export declare const inject: string[];
 /**

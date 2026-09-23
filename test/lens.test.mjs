@@ -9,7 +9,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { redact, compileExtraPatterns } from '../lib/jev.js'
+import { redact, compileExtraPatterns } from '@dsh-external/dsh-jev-core'
 import { destructiveBand, DESTRUCTIVE_QUESTION, INJECTION_QUESTION } from '../lib/questions.js'
 import { buildDrillPayload, buildScreenWarning, detectCanary, makeCanary } from '../lib/canary.js'
 import { append, ledgerFile, load, render, summarize } from '../lib/ledger.js'

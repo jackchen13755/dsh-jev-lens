@@ -34,7 +34,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { createJev, redact, JevError, type Jev, type JevQuestion } from './jev.js'
+import { createJev, redact, JevError, type Jev, type JevQuestion } from '@dsh-external/dsh-jev-core'
 import {
   DESTRUCTIVE_KEY, DESTRUCTIVE_QUESTION, INJECTION_QUESTION, RESTORABLE_KEY,
   DEFAULT_GATE_POLICY, commandQuestions, destructiveBand, destructiveState,
@@ -45,9 +45,9 @@ import { featureLabel, scoreScreen } from './screen-filter.js'
 import { AB_ARMS, buildProbe, judgeReply, type AbArm } from './ab.js'
 import { append, ledgerFile, load, render, summarize, type DrillArm, type LedgerRecord, type Via } from './ledger.js'
 import { prefilter } from './rules.js'
-import { createCache, keyOf, type Cache } from './cache.js'
-import { createBreaker, createLimiter, percentiles } from './resilience.js'
-import { serviceOf, type CredentialsService, type Logger, type WebRequestLike, type WebResponseLike, type WebServerLike } from './host.js'
+import { createCache, keyOf, type Cache } from '@dsh-external/dsh-jev-core'
+import { createBreaker, createLimiter, percentiles } from '@dsh-external/dsh-jev-core'
+import { serviceOf, type CredentialsService, type Logger, type WebRequestLike, type WebResponseLike, type WebServerLike } from '@dsh-external/dsh-jev-core'
 import {
   DEFAULT_API_KEY_REF, LENS_DEFAULTS, loadSecret, loadStored, mergeSettings, saveSecret, saveStored,
   validateSettings, type LensSettings,

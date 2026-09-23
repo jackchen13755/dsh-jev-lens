@@ -14,7 +14,7 @@
  *
  * @module dsh-jev-lens/questions
  */
-import type { JevQuestion } from './jev.js';
+import type { JevQuestion } from '@dsh-external/dsh-jev-core';
 /**
  * `dsh-jev-guard` v0.1 — the zh-CN wording its 0.5/0.7 thresholds were
  * calibrated against (114 labelled cases, 90.4%). Do not translate this: the

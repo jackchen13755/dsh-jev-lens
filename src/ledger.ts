@@ -19,7 +19,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { percentiles } from './resilience.js'
+import { percentiles } from '@dsh-external/dsh-jev-core'
 
 export type Band = 'allow' | 'revise' | 'block'
 export type DrillArm = 'bare' | 'warn'
