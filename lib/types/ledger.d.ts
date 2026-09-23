@@ -57,6 +57,12 @@ export type LedgerRecord = {
     via?: Via;
     /** True when the redaction pass actually changed the text before it left the machine. */
     redacted?: boolean;
+    /**
+     * Which prefilter features fired, by name — as important as the score itself,
+     * because it is the only record of *why* a page was escalated. Content is never
+     * stored; a rule name is not content.
+     */
+    features?: string;
 } | {
     t: number;
     kind: 'degraded';
@@ -67,6 +73,18 @@ export type LedgerRecord = {
     /** Which call went unjudged — the join key that makes a blind window auditable. */
     session?: string;
     callId?: string;
+} | {
+    /**
+     * A screen the *rules* decided to skip: the page carried nothing
+     * instruction-shaped, so no request was made. Recorded because "how much did
+     * the prefilter save, and what did it wave through" is a question the report
+     * must be able to answer.
+     */
+    t: number;
+    kind: 'screen-skip';
+    tool: string;
+    chars: number;
+    reason: string;
 } | {
     t: number;
     kind: 'drill-start';
@@ -175,6 +193,13 @@ export interface Report {
         meanP: number;
         chars: number;
         cached: number;
+        /** Pages the rules kept away from the paid judgment, with no request at all. */
+        prefilterSkipped: number;
+        /** Feature names that fired, most frequent first — which tells earn their place. */
+        features: Array<{
+            feature: string;
+            n: number;
+        }>;
         /** Blocking latency: this channel awaits before the model sees the page. */
         latency: {
             p50: number;

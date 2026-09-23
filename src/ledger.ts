@@ -44,6 +44,12 @@ export type LedgerRecord =
     ms?: number; attempts?: number; via?: Via
     /** True when the redaction pass actually changed the text before it left the machine. */
     redacted?: boolean
+    /**
+     * Which prefilter features fired, by name — as important as the score itself,
+     * because it is the only record of *why* a page was escalated. Content is never
+     * stored; a rule name is not content.
+     */
+    features?: string
   }
   | {
     t: number; kind: 'degraded'; where: string; reason: string
@@ -51,6 +57,15 @@ export type LedgerRecord =
     detail?: string
     /** Which call went unjudged — the join key that makes a blind window auditable. */
     session?: string; callId?: string
+  }
+  | {
+    /**
+     * A screen the *rules* decided to skip: the page carried nothing
+     * instruction-shaped, so no request was made. Recorded because "how much did
+     * the prefilter save, and what did it wave through" is a question the report
+     * must be able to answer.
+     */
+    t: number; kind: 'screen-skip'; tool: string; chars: number; reason: string
   }
   | { t: number; kind: 'drill-start'; session: string; drillId: string; arm: DrillArm; scenario: string; p: number; canary: string }
   | { t: number; kind: 'drill-end'; session: string; drillId: string; hijacked: boolean; evidence: string }
@@ -140,6 +155,10 @@ export interface Report {
   screens: {
     n: number; flagged: number; flaggedRate: number; meanP: number; chars: number
     cached: number
+    /** Pages the rules kept away from the paid judgment, with no request at all. */
+    prefilterSkipped: number
+    /** Feature names that fired, most frequent first — which tells earn their place. */
+    features: Array<{ feature: string, n: number }>
     /** Blocking latency: this channel awaits before the model sees the page. */
     latency: { p50: number; p95: number; max: number; mean: number }
   }
@@ -326,6 +345,16 @@ export function summarize (records: LedgerRecord[], days: number, usdPerMTok = 0
     },
     screens: {
       n: screens.length,
+      prefilterSkipped: records.filter(r => r.kind === 'screen-skip').length,
+      features: (() => {
+        const counts = new Map<string, number>()
+        for (const screen of screens) {
+          for (const feature of String((screen as { features?: string }).features ?? '').split(',').filter(Boolean)) {
+            counts.set(feature, (counts.get(feature) ?? 0) + 1)
+          }
+        }
+        return [...counts.entries()].map(([feature, n]) => ({ feature, n })).sort((a, b) => b.n - a.n).slice(0, 8)
+      })(),
       flagged: screens.filter(s => s.flagged).length,
       flaggedRate: screens.length ? round(screens.filter(s => s.flagged).length / screens.length) : 0,
       meanP: round(mean(screens.map(s => s.p))),
@@ -397,7 +426,9 @@ export function render (report: Report): string {
     '',
     '**B. 注入筛查（对抓取内容打分）**',
     report.screens.n
-      ? `筛查 ${report.screens.n} 次 · 其中 ${report.screens.flagged} 次 ≥阈值（${(report.screens.flaggedRate * 100).toFixed(1)}%）· mean p=${report.screens.meanP}${report.screens.cached ? ` · 命中缓存 ${report.screens.cached}` : ''}`
+      ? `筛查 ${report.screens.n} 次 · 其中 ${report.screens.flagged} 次 ≥阈值（${(report.screens.flaggedRate * 100).toFixed(1)}%）· mean p=${report.screens.meanP}${report.screens.cached ? ` · 命中缓存 ${report.screens.cached}` : ''}${
+        report.screens.prefilterSkipped ? ` · **规则前置省下 ${report.screens.prefilterSkipped} 次请求**（无指令特征，不必花钱）` : ''}${
+        report.screens.features.length ? ` · 命中的特征：${report.screens.features.map(f => `${f.feature}×${f.n}`).join(' · ')}` : ''}`
       : '筛查 0 次',
     report.screens.latency.p50
       ? `**这是唯一挡在路上的通道**：p50 ${min(report.screens.latency.p50)} · p95 ${min(report.screens.latency.p95)} · max ${min(report.screens.latency.max)}（每轮抓取都要等它）`

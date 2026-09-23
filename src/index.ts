@@ -41,6 +41,7 @@ import {
   gateAction, resolveGateAction, gateMessage, type GateAction, type GatePolicy,
 } from './questions.js'
 import { buildDrillPayload, buildScreenWarning, detectCanary, makeCanary, type DrillScenario } from './canary.js'
+import { featureLabel, scoreScreen } from './screen-filter.js'
 import { AB_ARMS, buildProbe, judgeReply, type AbArm } from './ab.js'
 import { append, ledgerFile, load, render, summarize, type DrillArm, type LedgerRecord, type Via } from './ledger.js'
 import { prefilter } from './rules.js'
@@ -887,6 +888,20 @@ export function apply (ctx: LensContext, input: Partial<Config> = {}): void {
     const session = sessionOf(exec)
     const sample = prep(text).slice(0, config.maxScreenChars)
     const wasRedacted = config.redact && sample !== text.slice(0, config.maxScreenChars)
+    /*
+     * Rules first, model second. Screening costs ~1.2 s on the critical path and most
+     * fetched pages are ordinary documentation; the prefilter is a microsecond check
+     * (measured offline: 0/16 false positives on benign pages, 15/15 catches on a
+     * labelled injection corpus). A planted drill bypasses it on purpose — a drill
+     * measures the screening channel itself, and a rules pass that skipped the
+     * canaries would quietly make that experiment vacuous.
+     */
+    const prefilter = scoreScreen(sample)
+    if (!drillHit && !prefilter.suspicious) {
+      append(ledgerDir, { t: Date.now(), kind: 'screen-skip', tool: e.name, chars: text.length, reason: 'prefilter:clean' })
+      reason('prefilter:screen-skip')
+      return null
+    }
     const cacheKey = keyOf([screenHash(), sample])
     const warnAttached = config.mode === 'warn' || config.mode === 'gate'
 
@@ -963,6 +978,8 @@ export function apply (ctx: LensContext, input: Partial<Config> = {}): void {
         attempts,
         via,
         ...(wasRedacted ? { redacted: true } : {}),
+        // Which tells fired, by name: the only record of why this page was escalated.
+        ...(prefilter.suspicious ? { features: featureLabel(prefilter) } : {}),
       })
       if (!flagged) return null
       /*

@@ -199,6 +199,22 @@ test('coverage is reported, and it cannot be faked by a healthy-looking window',
   assert.match(render(clean), /无跳过/)
 })
 
+test('the report shows what the prefilter saved and which tells fired', () => {
+  const records = [
+    { t: 1, kind: 'screen', tool: 'web_fetch', p: 0.9, flagged: true, chars: 9000, model: 'jev-1.13.0', inputTokens: 2000, ms: 1186, via: 'jev', features: 'override-instruction,tool-call-shape' },
+    { t: 2, kind: 'screen', tool: 'web_fetch', p: 0.2, flagged: false, chars: 4000, model: 'jev-1.13.0', inputTokens: 900, ms: 700, via: 'jev', features: 'encoded-blob' },
+    { t: 3, kind: 'screen-skip', tool: 'web_fetch', chars: 8000, reason: 'prefilter:clean' },
+    { t: 4, kind: 'screen-skip', tool: 'web_search', chars: 1200, reason: 'prefilter:clean' },
+  ]
+  const report = summarize(records, 1)
+  assert.equal(report.screens.n, 2)
+  assert.equal(report.screens.prefilterSkipped, 2)
+  assert.deepEqual(report.screens.features[0], { feature: 'override-instruction', n: 1 })
+  const text = render(report)
+  assert.match(text, /规则前置省下 2 次请求/)
+  assert.match(text, /override-instruction×1/)
+})
+
 test('an ask that cannot reach a human degrades to allow, and says so', () => {
   /*
    * Under an `approval: never` session the harness resolves every ask as
