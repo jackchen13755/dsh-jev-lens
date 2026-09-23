@@ -169,6 +169,25 @@ export interface Report {
     latency: { p50: number; p95: number; max: number; mean: number }
   }
   gates: { allow: number; ask: number; deny: number }
+  /**
+   * The kit-triage dimension: failing test runs handed to `dsh-jev-kit`.
+   *
+   * It was recorded (`kind: 'triage'`, with level and latency) and never reported, so
+   * the one automatic entry this plugin owns was invisible in its own report — the same
+   * shape of gap the lens exists to catch elsewhere. `declined` is kept beside `judged`
+   * for the reason `coverage` exists: a verdict count alone cannot tell "nothing was
+   * failing" from "something was failing and we did not look".
+   */
+  triage: {
+    judged: number
+    /** Verdicts that came back non-neutral (flaky / genuine regression). */
+    flagged: number
+    /** Failures that matched a signature already judged this session. */
+    cached: number
+    /** Failures handed over but not triaged: declined, over the limit, or unreachable. */
+    declined: number
+    latency: { p50: number; p95: number; max: number; mean: number }
+  }
   /** Does `p` actually order commands by how they turned out? Rank separation, not calibration. */
   rank: RankReport
   health: { degraded: number; errors: number }
@@ -396,6 +415,17 @@ export function summarize (records: LedgerRecord[], days: number, usdPerMTok = 0
       savedCalls,
       savedUsd: round(savedCalls * meanTokensPerCall * usdPerMTok / 1e6, 6),
     },
+    triage: (() => {
+      const triaged = records.filter((r): r is Extract<LedgerRecord, { kind: 'triage' }> => r.kind === 'triage')
+      const declined = records.filter(r => r.kind === 'degraded' && typeof (r as { reason?: string }).reason === 'string' && (r as { reason: string }).reason.startsWith('triage:')).length
+      return {
+        judged: triaged.length,
+        flagged: triaged.filter(r => r.level === 'flag' || r.level === 'warn').length,
+        cached: records.filter(r => r.kind === 'degraded' && (r as { reason?: string }).reason === 'triage:cached').length,
+        declined,
+        latency: percentiles(triaged.map(r => r.ms).filter(ms => ms > 0)),
+      }
+    })(),
     errors: records.filter(r => r.kind === 'error').length,
   }
 }
@@ -426,6 +456,14 @@ export function render (report: Report): string {
     c.restorable.known
       ? `第二问（可恢复性）覆盖 ${c.restorable.known}/${c.n} · 其中改变判定 ${c.restorable.decisive} 条 · block 但可恢复 ${c.restorable.conflicts} 条`
       : '第二问未启用（commandQuestions batched=false）',
+    /*
+     * Only when there is something to say, and always with the declines beside the
+     * verdicts: this is the plugin's only automatic entry into the kit, and a bare
+     * "triage 0" would read as "nothing was failing" rather than "nothing was looked at".
+     */
+    report.triage.judged || report.triage.declined
+      ? `测试失败自动分流（→ dsh-jev-kit）：判定 ${report.triage.judged} 次（非中性 ${report.triage.flagged}）· 去重跳过 ${report.triage.cached} · 未判定 ${report.triage.declined}${report.triage.latency.p50 ? ` · p50 ${min(report.triage.latency.p50)}` : ''}`
+      : '',
     report.rank.auc === null
       ? `排序能力：样本不足（报错组 ${report.rank.errored} / 成功组 ${report.rank.ok}）——两组各 ≥10 才算得出来`
       : `排序能力 AUC=${report.rank.auc}（0.5=瞎猜，>0.7 才有排序价值）· 报错组 mean p=${report.rank.meanPErrored}(n=${report.rank.errored}) vs 成功组 ${report.rank.meanPOk}(n=${report.rank.ok})`,

@@ -227,6 +227,30 @@ export interface Report {
         ask: number;
         deny: number;
     };
+    /**
+     * The kit-triage dimension: failing test runs handed to `dsh-jev-kit`.
+     *
+     * It was recorded (`kind: 'triage'`, with level and latency) and never reported, so
+     * the one automatic entry this plugin owns was invisible in its own report — the same
+     * shape of gap the lens exists to catch elsewhere. `declined` is kept beside `judged`
+     * for the reason `coverage` exists: a verdict count alone cannot tell "nothing was
+     * failing" from "something was failing and we did not look".
+     */
+    triage: {
+        judged: number;
+        /** Verdicts that came back non-neutral (flaky / genuine regression). */
+        flagged: number;
+        /** Failures that matched a signature already judged this session. */
+        cached: number;
+        /** Failures handed over but not triaged: declined, over the limit, or unreachable. */
+        declined: number;
+        latency: {
+            p50: number;
+            p95: number;
+            max: number;
+            mean: number;
+        };
+    };
     /** Does `p` actually order commands by how they turned out? Rank separation, not calibration. */
     rank: RankReport;
     health: {

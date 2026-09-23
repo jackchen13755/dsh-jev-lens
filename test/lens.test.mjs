@@ -229,3 +229,40 @@ test('a batch trial report renders all three arms and the marginal effect', () =
   assert.match(text, /harness 规则相对裸页面：25 个百分点/)
   assert.match(text, /执行率的边际效果：25 个百分点/)
 })
+
+test('the report shows the kit-triage dimension, declines included', () => {
+  /*
+   * The lens's only automatic entry into the kit: a failing test run handed to
+   * `dsh-jev-kit`. It was recorded (level, latency) and never reported, so the entry
+   * point this plugin owns was invisible in its own report — the same shape of gap the
+   * lens exists to catch in other people's instruments.
+   *
+   * Declines are reported beside verdicts for the reason `coverage` exists: "triage 0"
+   * alone cannot tell "nothing was failing" from "something failed and we did not look".
+   */
+  const dir = tmp()
+  const now = Date.now()
+  append(dir, { t: now, kind: 'triage', where: 'npm test', signature: 'sig-1', level: 'flag', ms: 900, values: {} })
+  append(dir, { t: now + 1, kind: 'triage', where: 'npm test', signature: 'sig-2', level: 'info', ms: 1100, values: {} })
+  append(dir, { t: now + 2, kind: 'degraded', where: 'triage', reason: 'triage:cached' })
+  append(dir, { t: now + 3, kind: 'degraded', where: 'triage', reason: 'triage:session-limit' })
+  // An unrelated degraded row must not be counted as a triage decline.
+  append(dir, { t: now + 4, kind: 'degraded', where: 'screen', reason: 'screen:prefilter' })
+
+  const report = summarize(load(dir, 1, new Date(now)), 1)
+  assert.equal(report.triage.judged, 2)
+  assert.equal(report.triage.flagged, 1, 'only the non-neutral verdict counts as flagged')
+  assert.equal(report.triage.cached, 1)
+  assert.equal(report.triage.declined, 2, 'cached + session-limit; not the screen skip')
+  assert.equal(report.triage.latency.p50, 1100, 'p50 takes the upper of the two, per the shared percentiles helper')
+
+  const text = render(report)
+  assert.match(text, /测试失败自动分流/)
+  assert.match(text, /判定 2 次（非中性 1）/)
+  assert.match(text, /未判定 2/)
+
+  // Nothing triaged and nothing declined: stay quiet rather than print a reassuring 0.
+  const empty = summarize([], 1)
+  assert.equal(empty.triage.judged, 0)
+  assert.doesNotMatch(render(empty), /测试失败自动分流/)
+})
