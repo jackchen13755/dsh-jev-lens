@@ -55,6 +55,23 @@ import {
   validateSettings, type LensSettings,
 } from './settings.js'
 
+/**
+ * Producer-owned message source for this plugin (session format v4).
+ *
+ * v4 retired the shared `{ kind: 'plugin', plugin }` member: each producer owns
+ * its own kind, and the v3→v4 migration rewrites legacy rows to `plugin:<name>`.
+ * Declaring it here keeps the source merge-extensible and type-checked.
+ */
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'plugin:@dsh-external/dsh-jev-lens': {
+      kind: 'plugin:@dsh-external/dsh-jev-lens'
+      form?: string
+      summary?: string
+    }
+  }
+}
+
 export const name = '@dsh-external/dsh-jev-lens'
 export const inject = ['tools']
 
@@ -1086,12 +1103,14 @@ export function apply (ctx: LensContext, input: Partial<Config> = {}): void {
             ...notes.map(text => createUserMessage({
               content: [{ type: 'text', text }],
               /*
-               * `MessageSourceMap.plugin` carries the producer's identity in its own
-               * field — `kind` is the (merge-extensible) union member, not a
-               * `plugin:<name>` string. The original attempt folded both into `kind`,
-               * which is why this file compiled only in the sense that nobody built it.
+               * Session format v4 retired the bare `{ kind: 'plugin', plugin }` pair:
+               * each producer owns a kind string and there is no shared `plugin`
+               * member. The v3→v4 migration rewrites this source to `plugin:<name>`,
+               * so emit that canonical form directly — otherwise the v4 encoder
+               * refuses the row ("format v4 message requires a producer-owned source
+               * kind") the moment a note is attached.
                */
-              source: { kind: 'plugin', plugin: '@dsh-external/dsh-jev-lens' },
+              source: { kind: 'plugin:@dsh-external/dsh-jev-lens' },
             })),
           ],
         }

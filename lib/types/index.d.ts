@@ -2,6 +2,22 @@
 /// <reference types="node" resolution-mode="require"/>
 import { type GatePolicy } from './questions.js';
 import { type Logger, type WebServerLike } from '@dsh-external/dsh-jev-core';
+/**
+ * Producer-owned message source for this plugin (session format v4).
+ *
+ * v4 retired the shared `{ kind: 'plugin', plugin }` member: each producer owns
+ * its own kind, and the v3→v4 migration rewrites legacy rows to `plugin:<name>`.
+ * Declaring it here keeps the source merge-extensible and type-checked.
+ */
+declare module '@deepseek-ai/dsh-llm' {
+    interface MessageSourceMap {
+        'plugin:@dsh-external/dsh-jev-lens': {
+            kind: 'plugin:@dsh-external/dsh-jev-lens';
+            form?: string;
+            summary?: string;
+        };
+    }
+}
 export declare const name = "@dsh-external/dsh-jev-lens";
 export declare const inject: string[];
 /**
